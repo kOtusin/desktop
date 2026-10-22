@@ -1,0 +1,30 @@
+--- a/gfx/layers/NativeLayerCA.mm
++++ b/gfx/layers/NativeLayerCA.mm
+@@ -810,7 +810,12 @@
+ 
+ CGColorRef CGColorCreateForDeviceColor(const gfx::DeviceColor& aColor) {
+   if (StaticPrefs::gfx_color_management_native_srgb()) {
+-    return CGColorCreateSRGB(aColor.r, aColor.g, aColor.b, aColor.a);
++    // zen-macos-legacy: CGColorCreateSRGB is 10.15+; fall back to generic
++    // RGB on older systems (color handling was untinted/precision-limited
++    // there before this API existed).
++    if (@available(macOS 10.15, *)) {
++      return CGColorCreateSRGB(aColor.r, aColor.g, aColor.b, aColor.a);
++    }
+   }
+ 
+   return CGColorCreateGenericRGB(aColor.r, aColor.g, aColor.b, aColor.a);
+@@ -1843,7 +1848,12 @@
+   }
+ 
+   if (aSpecializeVideo && mMutatedIsDRM) {
+-    ((AVSampleBufferDisplayLayer*)mContentCALayer).preventsCapture = aIsDRM;
++    // zen-macos-legacy: preventsCapture is 10.15+; on Mojave DRM video just
++    // doesn't opt out of capture (no hardware-capture protection occurred
++    // pre-10.15 either).
++    if (@available(macOS 10.15, *)) {
++      ((AVSampleBufferDisplayLayer*)mContentCALayer).preventsCapture = aIsDRM;
++    }
+   }
+ 
+   bool shouldTintOpaqueness = StaticPrefs::gfx_core_animation_tint_opaque();
