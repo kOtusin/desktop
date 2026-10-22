@@ -1,0 +1,18 @@
+--- a/gfx/thebes/CoreTextFontList.cpp
++++ b/gfx/thebes/CoreTextFontList.cpp
+@@ -1188,8 +1188,13 @@
+     }
+   } while (result != kCFURLEnumeratorEnd);
+ 
+-  CTFontManagerRegisterFontURLs(urls, kCTFontManagerScopeProcess, false,
+-                                nullptr);
++  // zen-macos-legacy: CTFontManagerRegisterFontURLs is 10.15+. On older
++  // systems we simply skip this registration; font lookup then goes through
++  // the regular CoreText application-font path, as before this feature.
++  if (__builtin_available(macOS 10.15, *)) {
++    CTFontManagerRegisterFontURLs(urls, kCTFontManagerScopeProcess, false,
++                                  nullptr);
++  }
+ }
+ 
+ void CoreTextFontList::ReadSystemFontList(dom::SystemFontList* aList)
