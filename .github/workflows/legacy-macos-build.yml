@@ -1,0 +1,174 @@
+# Zen Browser for legacy macOS (10.13 / 10.14 "Mojave")
+# Fork-only workflow: builds a single-arch x86_64 DMG on a free GitHub-hosted
+# Ubuntu runner, using the same cross-compilation pipeline as upstream
+# (cctools-port + libdmg + hfsplus), but without PGO and with the
+# deployment target lowered to 10.13 (see configs/macos/mozconfig).
+name: macOS Legacy Build (10.13/10.14)
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      display-version:
+        description: "Display version (e.g. 1.23.4b-mojave)"
+        required: true
+        default: "1.23.4b-mojave"
+      use-sccache:
+        description: "Use sccache"
+        type: boolean
+        default: true
+
+concurrency:
+  group: macos-legacy-build
+  cancel-in-progress: false
+
+jobs:
+  mac-legacy-build:
+    name: Build macOS x86_64 (legacy)
+    runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: ${{ inputs.use-sccache && 'true' || 'false' }}
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 0
+    timeout-minutes: 360
+
+    steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@main
+        if: ${{ inputs.use-sccache }}
+        with:
+          disable_annotations: true
+
+      - name: Setup Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pip zstd yasm nasm build-essential libgtk2.0-dev libpython3-dev m4 uuid libasound2-dev libcurl4-openssl-dev libdbus-1-dev libdrm-dev libdbus-glib-1-dev libgtk-3-dev libpulse-dev libx11-xcb-dev libxt-dev libdbus-glib-1-dev libx11-dev --fix-missing
+
+      - name: Load Surfer CI setup
+        run: npm run surfer -- ci --brand release --display-version ${{ inputs.display-version }}
+
+      - name: Download Firefox and dependencies
+        run: npm run download
+
+      - name: Setup for macOS (cctools and DMG tools)
+        id: cache-mac-cross
+        uses: actions/cache@v4
+        with:
+          path: ~/mac-cross
+          key: mac-cross-legacy
+
+      - name: Fetch mac-cross toolchain
+        if: steps.cache-mac-cross.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          mkdir -p ~/mac-cross
+          cd engine/
+          ./mach artifact toolchain --from-build linux64-cctools-port linux64-libdmg linux64-hfsplus
+          mv cctools dmg hfsplus ~/mac-cross/
+          ls ~/mac-cross/cctools/bin/x86_64-apple-darwin-ld
+
+      - name: Setup Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain "$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)"
+          source "$HOME/.cargo/env"
+          rustup target add x86_64-apple-darwin
+
+      - name: Import
+        env:
+          SURFER_COMPAT: x86_64
+          SURFER_PLATFORM: darwin
+        run: |
+          . "$HOME/.cargo/env"
+          npm run import -- --verbose
+
+      - name: Bootstrap
+        run: |
+          export SURFER_PLATFORM="darwin"
+          npm run bootstrap
+
+      - name: Build language packs
+        run: sh scripts/download-language-packs.sh
+
+      - name: Import MAR signing certificate into updater
+        run: |
+          set -e
+          if [ ! -f build/signing/public_key.der ]; then
+            echo "No committed public_key.der, generating our own..."
+            bash scripts/mar_sign.sh -g
+          fi
+          bash scripts/mar_sign.sh -i
+
+      - name: Build
+        env:
+          SURFER_COMPAT: x86_64
+          SURFER_PLATFORM: darwin
+          ZEN_CROSS_COMPILING: "1"
+          ZEN_RELEASE: "1"
+          ZEN_GA_DISABLE_PGO: "1"
+          ZEN_SAFEBROWSING_API_KEY: ${{ secrets.ZEN_SAFEBROWSING_API_KEY }}
+          ZEN_MOZILLA_API_KEY: ${{ secrets.ZEN_MOZILLA_API_KEY }}
+          ZEN_GOOGLE_LOCATION_SERVICE_API_KEY: ${{ secrets.ZEN_GOOGLE_LOCATION_SERVICE_API_KEY }}
+        run: |
+          set -e
+          ulimit -n 4096
+          npm run build
+          echo "Build complete"
+
+      - name: Package
+        env:
+          SURFER_COMPAT: x86_64
+          SURFER_PLATFORM: darwin
+          ZEN_CROSS_COMPILING: "1"
+          ZEN_RELEASE: "1"
+          ZEN_GA_DISABLE_PGO: "1"
+        run: |
+          set -e
+          npm run package
+
+      - name: Rename artifacts
+        run: |
+          set -ex
+          mv ./dist/*.dmg ./zen-mojave-x86_64-apple-darwin-dist.dmg
+          mv ./engine/obj-x86_64-apple-darwin/dist/bin/platform.ini ./platform.ini
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          retention-days: 14
+          name: zen-mojave-x86_64-apple-darwin-dist
+          path: ./zen-mojave-x86_64-apple-darwin-dist.dmg
+
+      - name: Upload platform.ini
+        uses: actions/upload-artifact@v4
+        with:
+          retention-days: 14
+          name: zen-mojave-platform-ini
+          path: ./platform.ini
