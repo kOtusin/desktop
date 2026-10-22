@@ -35,9 +35,7 @@ jobs:
       SCCACHE_GHA_ENABLED: ${{ inputs.use-sccache != false && 'true' || 'false' }}
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: 0
-      # Критически важно: заставляет Rust-компоненты собираться с целевой версией 10.13
       MACOSX_DEPLOYMENT_TARGET: "10.13"
-      # Отключаем LTO для Rust, чтобы избежать несовместимости с кросс-линковщиком
       MOZ_LTO: ""
       MOZ_LTO_RUST_CROSS: ""
     timeout-minutes: 360
@@ -67,6 +65,7 @@ jobs:
       - name: Install Node dependencies
         run: |
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
       - name: Verify Surfer
         run: npx surfer --version
 
@@ -80,6 +79,7 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -89,6 +89,7 @@ jobs:
             libcurl4-openssl-dev libdbus-1-dev libdrm-dev \
             libdbus-glib-1-dev libgtk-3-dev libpulse-dev \
             libx11-xcb-dev libxt-dev libx11-dev --fix-missing
+
       - name: Load Surfer CI setup
         env:
           DISPLAY_VERSION: ${{ inputs.display-version || '1.23.4b-mojave' }}
@@ -113,12 +114,14 @@ jobs:
           ./mach artifact toolchain --from-build linux64-cctools-port linux64-libdmg linux64-hfsplus
           mv cctools dmg hfsplus ~/mac-cross/
           ls ~/mac-cross/cctools/bin/x86_64-apple-darwin-ld
+
       - name: Setup Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
             sh -s -- -y --default-toolchain "$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)"
           source "$HOME/.cargo/env"
           rustup target add x86_64-apple-darwin
+
       - name: Import
         env:
           SURFER_COMPAT: x86_64
@@ -126,10 +129,12 @@ jobs:
         run: |
           . "$HOME/.cargo/env"
           npm run import -- --verbose
+
       - name: Bootstrap
         run: |
           export SURFER_PLATFORM="darwin"
           npm run bootstrap
+
       - name: Build language packs
         run: sh scripts/download-language-packs.sh
 
@@ -141,11 +146,29 @@ jobs:
             bash scripts/mar_sign.sh -g
           fi
           bash scripts/mar_sign.sh -i
-      # Очистка артефактов перед сборкой, чтобы исключить несовместимые объектные файлы
+
+      # Patch: kCVImageBufferTransferFunction_Linear доступен только с 10.14,
+      # но сборка идёт с deployment target 10.13. Заменяем на строковый литерал.
+      - name: Patch AppleVTEncoder for 10.13 compatibility
+        run: |
+          set -e
+          FILE="engine/dom/media/platforms/apple/AppleVTEncoder.cpp"
+          if [ ! -f "$FILE" ]; then
+            echo "AppleVTEncoder.cpp not found" >&2
+            exit 1
+          fi
+          perl -0pi -e 's/return Some\(kCVImageBufferTransferFunction_Linear\);/return Some(CFSTR("Linear"));/' "$FILE"
+          if grep -q 'kCVImageBufferTransferFunction_Linear' "$FILE"; then
+            echo "Patch failed: constant still present" >&2
+            exit 1
+          fi
+          echo "Patched AppleVTEncoder.cpp: kCVImageBufferTransferFunction_Linear -> CFSTR(\"Linear\")"
+
       - name: Clean build artifacts
         run: |
           cd engine
           ./mach clobber || true
+
       - name: Build
         env:
           SURFER_COMPAT: x86_64
@@ -161,6 +184,7 @@ jobs:
           ulimit -n 4096
           npm run build
           echo "Build complete"
+
       - name: Package
         env:
           SURFER_COMPAT: x86_64
@@ -171,11 +195,13 @@ jobs:
         run: |
           set -e
           npm run package
+
       - name: Rename artifacts
         run: |
           set -ex
           mv ./dist/*.dmg ./zen-mojave-x86_64-apple-darwin-dist.dmg
           mv ./engine/obj-x86_64-apple-darwin/dist/bin/platform.ini ./platform.ini
+
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
