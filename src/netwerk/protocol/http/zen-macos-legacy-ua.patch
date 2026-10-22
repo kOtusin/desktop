@@ -1,0 +1,52 @@
+--- a/netwerk/protocol/http/nsHttpHandler.cpp
++++ b/netwerk/protocol/http/nsHttpHandler.cpp
+@@ -3,6 +3,10 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ // HttpLog.h should generally be included first
++#if defined(XP_MACOSX)
++#  include <sys/sysctl.h>
++#endif
++
+ #include "nsHttpHandler.h"
+ 
+ #include <bitset>
+@@ -1217,7 +1221,37 @@
+ #  endif
+ 
+ #elif defined(XP_MACOSX)
+-  mOscpu.AssignLiteral("Intel Mac OS X 10.15");
++  // Determine the real macOS version at runtime instead of hard-coding
++  // "10.15". This lets the browser run on macOS 10.13 and 10.14 (Mojave)
++  // while still capping the reported version at 10.15, like Safari does,
++  // to avoid confusing sites that expect "Intel Mac OS X 10.x".
++  // kern.osproductversion ("10.14") is available since macOS 10.13.4.
++  int uaMinorVersion = 15;
++  {
++    char osProductVersion[32] = {};
++    size_t versionLen = sizeof(osProductVersion);
++    if (sysctlbyname("kern.osproductversion", osProductVersion, &versionLen,
++                     nullptr, 0) == 0) {
++      int majorVersion = 0, minorVersion = 0;
++      if (sscanf(osProductVersion, "%d.%d", &majorVersion, &minorVersion) >=
++          1) {
++        if (majorVersion > 10) {
++          // Cap macOS 11+ (Big Sur and newer) at 10.15.
++          uaMinorVersion = 15;
++        } else if (majorVersion == 10) {
++          if (minorVersion > 15) {
++            minorVersion = 15;
++          }
++          uaMinorVersion = minorVersion;
++        }
++      }
++    }
++    // If sysctl fails, keep the safe default of 15 (10.15).
++  }
++
++  // Always report an "Intel" UA string, even on ARM64 macOS, like Safari.
++  mOscpu.Truncate();
++  mOscpu.AppendPrintf("Intel Mac OS X 10.%d", uaMinorVersion);
+ #elif defined(ANDROID)
+   mOscpu.AssignLiteral("Linux armv81");
+ #elif defined(XP_IOS)
