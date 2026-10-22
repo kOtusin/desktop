@@ -7,6 +7,18 @@ unset MOZ_STDCXX_COMPAT
 ac_add_options --disable-dmd
 ac_add_options --enable-eme=widevine
 
+# --- zen-macos-legacy fork ----------------------------------------------------
+# Build for legacy macOS: target 10.13+ so the x86_64 build runs on
+# macOS 10.13 (High Sierra) and 10.14 (Mojave).  The SDK used for
+# cross-builds (macOS 26.x, as required by upstream mozilla-release)
+# still supports deployment targets down to 10.13, so this only lowers
+# the runtime floor (MACOSX_DEPLOYMENT_TARGET / minos).
+# aarch64 keeps upstream's 11.0 floor (Apple arm64 never ran these systems).
+if test "$SURFER_COMPAT" = "x86_64"; then
+  ac_add_options --enable-macos-target=10.13
+fi
+# ------------------------------------------------------------------------------
+
 if test "$ZEN_CROSS_COMPILING"; then
   ZEN_MAC_CROSS="$HOME/mac-cross"
 
