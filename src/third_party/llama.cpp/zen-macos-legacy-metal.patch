@@ -1,0 +1,47 @@
+--- a/third_party/llama.cpp/ggml/src/ggml-metal/ggml-metal-context.m
++++ b/third_party/llama.cpp/ggml/src/ggml-metal/ggml-metal-context.m
+@@ -488,17 +488,21 @@
+                 id<MTLDevice> device = ggml_metal_device_get_obj(ctx->dev);
+                 ctx->capture_scope = [[MTLCaptureManager sharedCaptureManager] newCaptureScopeWithDevice:device];
+ 
+-                MTLCaptureDescriptor * descriptor = [MTLCaptureDescriptor new];
+-                descriptor.captureObject = ctx->capture_scope;
+-                descriptor.destination = MTLCaptureDestinationGPUTraceDocument;
+-                descriptor.outputURL = [NSURL fileURLWithPath:path];
++                if (@available(macOS 10.15, *)) { // zen-macos-legacy: MTLCaptureDescriptor API
++                    MTLCaptureDescriptor * descriptor = [MTLCaptureDescriptor new];
++                    descriptor.captureObject = ctx->capture_scope;
++                    descriptor.destination = MTLCaptureDestinationGPUTraceDocument;
++                    descriptor.outputURL = [NSURL fileURLWithPath:path];
+ 
+-                NSError * error = nil;
+-                if (![[MTLCaptureManager sharedCaptureManager] startCaptureWithDescriptor:descriptor error:&error]) {
+-                    GGML_LOG_ERROR("%s: error: unable to start capture '%s'\n", __func__, [[error localizedDescription] UTF8String]);
++                    NSError * error = nil;
++                    if (![[MTLCaptureManager sharedCaptureManager] startCaptureWithDescriptor:descriptor error:&error]) {
++                        GGML_LOG_ERROR("%s: error: unable to start capture '%s'\n", __func__, [[error localizedDescription] UTF8String]);
++                    } else {
++                        [ctx->capture_scope beginScope];
++                        ctx->capture_started = true;
++                    }
+                 } else {
+-                    [ctx->capture_scope beginScope];
+-                    ctx->capture_started = true;
++                    // zen-macos-legacy: GPU capture tracing unavailable below macOS 10.15
+                 }
+             }
+         }
+@@ -731,7 +735,12 @@
+ 
+     id<MTLDevice> device = ggml_metal_device_get_obj(ctx->dev);
+ 
+-    return [device supportsFamily:(MTLGPUFamilyApple1 + family - 1)];
++    if (@available(macOS 10.15, *)) { // zen-macos-legacy: supportsFamily API
++        return [device supportsFamily:(MTLGPUFamilyApple1 + family - 1)];
++    }
++    // zen-macos-legacy: Metal GPU families are unavailable below macOS 10.15,
++    // report no support so callers gracefully skip this backend.
++    return false;
+ }
+ 
+ void ggml_metal_capture_next_compute(ggml_metal_t ctx) {
