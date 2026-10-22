@@ -1,9 +1,4 @@
 # Zen Browser for legacy macOS (10.13 / 10.14 "Mojave")
-# Fork-only workflow: builds a single-arch x86_64 DMG on a free GitHub-hosted
-# Ubuntu runner, using the same cross-compilation pipeline as upstream
-# (cctools-port + libdmg + hfsplus), but without PGO and with the
-# deployment target lowered to 10.13 (see configs/macos/mozconfig).
-
 name: macOS Legacy Build (10.13/10.14)
 
 permissions:
@@ -37,11 +32,14 @@ jobs:
     name: Build macOS x86_64 (legacy)
     runs-on: ubuntu-latest
     env:
-      # push events have no `inputs` context: `inputs.use-sccache != false`
-      # evaluates to true in that case, so sccache stays on by default.
       SCCACHE_GHA_ENABLED: ${{ inputs.use-sccache != false && 'true' || 'false' }}
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: 0
+      # Критически важно: заставляет Rust-компоненты собираться с целевой версией 10.13
+      MACOSX_DEPLOYMENT_TARGET: "10.13"
+      # Отключаем LTO для Rust, чтобы избежать несовместимости с кросс-линковщиком
+      MOZ_LTO: ""
+      MOZ_LTO_RUST_CROSS: ""
     timeout-minutes: 360
 
     steps:
@@ -66,14 +64,9 @@ jobs:
         with:
           node-version-file: ".nvmrc"
 
-      # Required: provides node_modules/.bin/surfer used by every later npm run
       - name: Install Node dependencies
         run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
       - name: Verify Surfer
         run: npx surfer --version
@@ -155,6 +148,12 @@ jobs:
             bash scripts/mar_sign.sh -g
           fi
           bash scripts/mar_sign.sh -i
+
+      # Очистка артефактов перед сборкой, чтобы исключить несовместимые объектные файлы
+      - name: Clean build artifacts
+        run: |
+          cd engine
+          ./mach clobber || true
 
       - name: Build
         env:
