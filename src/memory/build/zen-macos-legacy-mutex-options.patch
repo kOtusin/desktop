@@ -1,0 +1,16 @@
+--- a/memory/build/Mutex.h
++++ b/memory/build/Mutex.h
+@@ -26,7 +26,12 @@
+ // https://github.com/apple/darwin-xnu/blob/main/bsd/sys/ulock.h and
+ // https://github.com/apple/darwin-libplatform/blob/main/private/os/lock_private.h
+ #  define OS_UNFAIR_LOCK_DATA_SYNCHRONIZATION (0x00010000)
+-#  define OS_UNFAIR_LOCK_ADAPTIVE_SPIN (0x00040000)
++// zen-macos-legacy: OS_UNFAIR_LOCK_ADAPTIVE_SPIN (0x00040000) was introduced
++// in macOS 10.15 (xnu ulock option). On 10.14 libplatform treats the unknown
++// bit as invalid and traps ("BUG IN CLIENT OF LIBPLATFORM: Invalid options",
++// SIGILL at _os_unfair_lock_lock_slow), which killed the browser at startup.
++// Drop the flag so the options value stays valid on Mojave.
++#  define OS_UNFAIR_LOCK_ADAPTIVE_SPIN (0x00000000)
+ 
+ extern "C" {
+ 
