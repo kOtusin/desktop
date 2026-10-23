@@ -1,0 +1,38 @@
+--- a/widget/cocoa/ScreenHelperCocoa.mm
++++ b/widget/cocoa/ScreenHelperCocoa.mm
+@@ -110,8 +110,18 @@
+ 
+   // What's the maximum color component value this screen can display? This
+   // is a reasonable stand-in for measuring peak brightness.
+-  CGFloat componentValueMax =
+-      aScreen.maximumPotentialExtendedDynamicRangeColorComponentValue;
++  // zen-macos-legacy: maximumPotentialExtendedDynamicRangeColorComponentValue
++  // only exists on macOS 10.15.4+. On Mojave it raises an "unrecognized
++  // selector" ObjC exception; NS_OBJC_END_TRY_BLOCK_RETURN then makes
++  // MakeScreen return nullptr, that nullptr lands in mScreenList and
++  // ScreenManager::Refresh SIGSEGVs reading fields of the null Screen*
++  // (movups [rsi+0x10]) right after startup.
++  CGFloat componentValueMax = 1.0;
++  if ([aScreen respondsToSelector:
++      @selector(maximumPotentialExtendedDynamicRangeColorComponentValue)]) {
++    componentValueMax =
++        aScreen.maximumPotentialExtendedDynamicRangeColorComponentValue;
++  }
+ 
+   // Should we treat this as HDR? Based on spec at
+   // https://drafts.csswg.org/mediaqueries-5/#dynamic-range, we'll consider it
+@@ -170,7 +180,13 @@
+     if ([desc objectForKey:NSDeviceIsScreen] == nil) {
+       continue;
+     }
+-    screens.AppendElement(MakeScreen(screen));
++    // zen-macos-legacy: MakeScreen can return nullptr if an ObjC exception
++    // was raised. A null entry in mScreenList dereferences as
++    // screen->ToScreenDetails() in ScreenManager::Refresh and SIGSEGVs.
++    RefPtr<Screen> newScreen = MakeScreen(screen);
++    if (newScreen) {
++      screens.AppendElement(newScreen.forget());
++    }
+   }
+ 
+   ScreenManager::Refresh(std::move(screens));
