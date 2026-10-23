@@ -1,0 +1,14 @@
+--- a/toolkit/xre/nsNativeAppSupportCocoa.mm
++++ b/toolkit/xre/nsNativeAppSupportCocoa.mm
+@@ -69,7 +69,10 @@
+ 
+   int major, minor, bugfix;
+   nsCocoaFeatures::GetSystemVersion(major, minor, bugfix);
+-  if (major >= 11 || (major == 10 && minor >= 15)) {
++  // zen-macos-legacy: upstream gates this at 10.15+, but we ship a 10.14
++  // (Mojave) build, so the check must accept 10.14 too or the browser
++  // exits at startup with "Minimum OS version requirement not met!".
++  if (major >= 11 || (major == 10 && minor >= 14)) {
+     *_retval = true;
+   } else {
+     NSLog(@"Minimum OS version requirement not met!");
