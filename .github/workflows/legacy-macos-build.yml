@@ -34,9 +34,7 @@ jobs:
       SCCACHE_GHA_ENABLED: ${{ inputs.use-sccache != false && 'true' || 'false' }}
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: 0
-      # Критически важно: целевая версия macOS для Rust-компонентов
       MACOSX_DEPLOYMENT_TARGET: "10.14"
-      # Отключаем LTO для Rust, чтобы избежать несовместимости с кросс-линковщиком
       MOZ_LTO: ""
       MOZ_LTO_RUST_CROSS: ""
     timeout-minutes: 360
@@ -123,36 +121,31 @@ jobs:
           source "$HOME/.cargo/env"
           rustup target add x86_64-apple-darwin
 
-      # ⬇️⬇️⬇️ ФИКС Bug 2068758: undefined _ggml_backend_metal_disable ⬇️⬇️⬇️
       - name: Apply Bug 2068758 fix (mozinference metal-disable)
         shell: bash
         run: |
           set -euo pipefail
           cd engine
 
-          # --- Попытка №1: cherry-pick upstream-патча ---
           echo "::group::Try upstream cherry-pick (Bug 2068758)"
           UPSTREAM=https://github.com/mozilla-firefox/firefox.git
           UPSTREAM_COMMIT=500af56f0ad8bfbaa9b69031549d73a7ba9d9419
           if git -c protocol.version=2 fetch --no-tags --depth=1 "$UPSTREAM" "$UPSTREAM_COMMIT"; then
             if git cherry-pick --no-commit FETCH_HEAD; then
-              echo "✅ Upstream cherry-pick applied successfully"
-              git reset  # оставляем изменения только в рабочем дереве
+              echo "Upstream cherry-pick applied successfully"
+              git reset
               echo "::endgroup::"
               exit 0
             else
-              echo "⚠️ cherry-pick failed, aborting and falling back to manual patch"
+              echo "cherry-pick failed, aborting and falling back to manual patch"
               git cherry-pick --abort || true
               git reset --hard HEAD
             fi
           fi
           echo "::endgroup::"
 
-          # --- Попытка №2: ручной патч ---
           echo "::group::Manual fallback patch"
 
-          # 2a. Убираем опасный символ из списка экспорта линкера.
-          #     Именно из-за него ld падает с "Undefined symbols ... -exported_symbol".
           SYMBOLS_FILE=""
           for candidate in \
               "config/external/mozinference/mozinference.symbols" \
@@ -170,7 +163,6 @@ jobs:
 
           if [ -n "$SYMBOLS_FILE" ] && [ -f "$SYMBOLS_FILE" ]; then
             echo "Patching symbols file: $SYMBOLS_FILE"
-            # Комментируем строку с символом, чтобы не ломать формат файла
             sed -i \
               -E 's@^([[:space:]]*)ggml_backend_metal_disable([[:space:]]*)$@\1# [bug2068758] \2@' \
               "$SYMBOLS_FILE" || \
@@ -181,7 +173,6 @@ jobs:
             echo "::warning::symbols file with ggml_backend_metal_disable not found; skipping 2a"
           fi
 
-          # 2b. Добавляем stub-определение функции, если Metal отключён.
           GGML_METAL=$(find third_party -type f -name 'ggml-metal.cpp' 2>/dev/null | head -n1 || true)
           if [ -z "$GGML_METAL" ]; then
             GGML_METAL=$(find . -type f -name 'ggml-metal.cpp' 2>/dev/null | head -n1 || true)
@@ -189,21 +180,20 @@ jobs:
           if [ -n "$GGML_METAL" ] && [ -f "$GGML_METAL" ]; then
             echo "Patching C++ stub into: $GGML_METAL"
             if ! grep -q 'ggml_backend_metal_disable' "$GGML_METAL"; then
-              cat >> "$GGML_METAL" <<'CPP_EOF'
-
-// [bug2068758] Stub so the export symbol always resolves on cross builds
-// where Metal is not compiled.
-#if !defined(GGML_USE_METAL)
-extern "C" void ggml_backend_metal_disable(void) {}
-#endif
-CPP_EOF
+              {
+                echo ''
+                echo '// [bug2068758] Stub so the export symbol always resolves on cross builds'
+                echo '// where Metal is not compiled.'
+                echo '#if !defined(GGML_USE_METAL)'
+                echo 'extern "C" void ggml_backend_metal_disable(void) {}'
+                echo '#endif'
+              } >> "$GGML_METAL"
             fi
           else
             echo "::warning::ggml-metal.cpp not found; skipping 2b (relies on 2a)"
           fi
 
           echo "::endgroup::"
-      # ⬆️⬆️⬆️ /ФИКС Bug 2068758 ⬆️⬆️⬆️
 
       - name: Import
         env:
@@ -230,7 +220,6 @@ CPP_EOF
           fi
           bash scripts/mar_sign.sh -i
 
-      # Чистим артефакты, чтобы старые объектники не «прилипали»
       - name: Clean build artifacts
         run: |
           cd engine
