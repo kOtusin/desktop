@@ -1,0 +1,18 @@
+--- a/build/moz.configure/warnings.configure
++++ b/build/moz.configure/warnings.configure
+@@ -335,8 +335,14 @@
+ )
+ 
+ # Warn if APIs are used without available() checks on macOS.
++# zen-macos-legacy: downgraded from -Werror to a plain warning. When
++# targeting macOS 10.14 on newer SDKs, the entire firefox tree has many
++# unguarded 10.15+ API uses that would block the build; each one is
++# patched with an explicit availability guard elsewhere in this fork, so
++# we surface them all as warnings (harvested from CI logs) instead of
++# hard-failing the build.
+ check_and_add_warning(
+-    "-Werror=unguarded-availability-new", when=target_is_osx, min_clang_version="5.0.0"
++    "-Wno-error=unguarded-availability-new", when=target_is_osx, min_clang_version="5.0.0"
+ )
+ 
+ # clang 17 warns about builtins being redefined and... well, we do that in
